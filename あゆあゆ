@@ -1,0 +1,51 @@
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+import os
+
+app = Flask(__name__)
+
+# LINEで取得した鍵を設定。後でサーバー側で入れるのでここはそのまま
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# ここが介護Q&Aのデータベース。増やしていけば賢くなる
+QA_DICT = {
+    "認知症 対応": "否定せず気持ちに寄り添うのが基本です。「そうだね」と受け止めてから、話題を変えたり安心できる環境を作りましょう。困ったら地域包括支援センターへ相談もおすすめです。",
+    "床ずれ 予防": "2時間ごとの体位変換、除圧マットレスの使用、皮膚を清潔に保つことが大切です。栄養状態も関係するので、かかりつけ医に相談してくださいね。",
+    "介護疲れ": "一人で抱え込まないでください。ショートステイ、デイサービス、介護休暇などの制度があります。まずは地域包括支援センターかケアマネさんに今の状況を話してみましょう。",
+    "default": "ご質問ありがとうございます。もう少し詳しく教えてもらえますか？\n例：「認知症 暴言」「おむつ交換 コツ」などキーワードを入れてもらえると答えやすいです。"
+}
+
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_message = event.message.text
+    reply_text = QA_DICT.get("default")
+    
+    # キーワードが含まれていたら該当の回答を返す
+    for keyword, answer in QA_DICT.items():
+        if keyword in user_message:
+            reply_text = answer
+            break
+            
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
+
+if __name__ == "__main__":
+    app.run()
